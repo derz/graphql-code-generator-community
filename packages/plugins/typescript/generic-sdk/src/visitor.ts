@@ -107,33 +107,54 @@ export class GenericSdkVisitor extends ClientSideBaseVisitor<
 
   public get sdkContent(): string {
     const usingObservable = !!this.config.usingObservableFrom;
-    const allPossibleActions = this._operationsToInclude
+    const allPossibleActionsConfig = this._operationsToInclude.map(o => {
+      const operationName = o.node.name.value;
+      const optionalVariables =
+        !o.node.variableDefinitions ||
+        o.node.variableDefinitions.length === 0 ||
+        o.node.variableDefinitions.every(v => v.type.kind !== Kind.NON_NULL_TYPE || v.defaultValue);
+      const docVarName = this.getDocumentNodeVariable(o.documentVariableName);
+      const returnType = isStreamOperation(o.node)
+        ? usingObservable
+          ? 'Observable'
+          : 'AsyncIterable'
+        : 'Promise';
+      const resultData = this.config.rawRequest
+        ? `ExecutionResult<${o.operationResultType}, E>`
+        : o.operationResultType;
+
+      return {
+        operationName,
+        optionalVariables,
+        operationVariablesTypes: o.operationVariablesTypes,
+        operationResultType: o.operationResultType,
+        docVarName,
+        returnType,
+        resultData,
+      };
+    });
+
+    const allPossibleActions = allPossibleActionsConfig
       .map(o => {
-        const operationName = o.node.name.value;
-        const optionalVariables =
-          !o.node.variableDefinitions ||
-          o.node.variableDefinitions.length === 0 ||
-          o.node.variableDefinitions.every(
-            v => v.type.kind !== Kind.NON_NULL_TYPE || v.defaultValue,
-          );
-        const docVarName = this.getDocumentNodeVariable(o.documentVariableName);
-        const returnType = isStreamOperation(o.node)
-          ? usingObservable
-            ? 'Observable'
-            : 'AsyncIterable'
-          : 'Promise';
-        const resultData = this.config.rawRequest
-          ? `ExecutionResult<${o.operationResultType}, E>`
-          : o.operationResultType;
-        return `${operationName}(variables${optionalVariables ? '?' : ''}: ${
-          o.operationVariablesTypes
-        }, options?: C): ${returnType}<${resultData}> {
-  return requester<${o.operationResultType}, ${
-          o.operationVariablesTypes
-        }>(${docVarName}, variables, options) as ${returnType}<${resultData}>;
+        return `export function ${o.operationName}<C, E>(requester: Requester<C, E>, variables${
+          o.optionalVariables ? '?' : ''
+        }: ${o.operationVariablesTypes}, options?: C): ${o.returnType}<${o.resultData}> {
+  return requester<${o.operationResultType}, ${o.operationVariablesTypes}>(${
+          o.docVarName
+        }, variables, options) as ${o.returnType}<${o.resultData}>;
 }`;
       })
       .map(s => indentMultiline(s, 2));
+
+    const allPossibleActionsImpl = allPossibleActionsConfig.map(o => {
+      return `${o.operationName}(variables${o.optionalVariables ? '?' : ''}: ${
+        o.operationVariablesTypes
+      }, options?: C): ${o.returnType}<${o.resultData}> {
+  return ${o.operationName}(requester, ${o.docVarName}, variables, options) as ${o.returnType}<${
+        o.resultData
+      }>;
+}`;
+    });
 
     const documentNodeType =
       this.config.documentMode === DocumentMode.string ? 'string' : 'DocumentNode';
@@ -142,10 +163,12 @@ export class GenericSdkVisitor extends ClientSideBaseVisitor<
       usingObservable ? 'Observable' : 'AsyncIterable'
     }<${resultData}>`;
 
-    return `export type Requester<C = {}, E = unknown> = <R, V>(doc: ${documentNodeType}, vars?: V, options?: C) => ${returnType}
+    return `
+${allPossibleActions.join('\n')}
+export type Requester<C = {}, E = unknown> = <R, V>(doc: ${documentNodeType}, vars?: V, options?: C) => ${returnType}
 export function getSdk<C, E>(requester: Requester<C, E>) {
   return {
-${allPossibleActions.join(',\n')}
+${allPossibleActionsImpl.join(',\n')}
   };
 }
 export type Sdk = ReturnType<typeof getSdk>;`;
