@@ -150,9 +150,7 @@ export class GenericSdkVisitor extends ClientSideBaseVisitor<
       return `${o.operationName}(variables${o.optionalVariables ? '?' : ''}: ${
         o.operationVariablesTypes
       }, options?: C): ${o.returnType}<${o.resultData}> {
-  return ${o.operationName}(requester, ${o.docVarName}, variables, options) as ${o.returnType}<${
-        o.resultData
-      }>;
+  return ${o.operationName}(requester, variables, options) as ${o.returnType}<${o.resultData}>;
 }`;
     });
 
